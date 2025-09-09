@@ -68,6 +68,7 @@ export type UISettings = {
   // global
   hudScalePct: number;     // 75..140 (%). Uniformly scales HUD size & positions while keeping ratios.
   uiStyle?: 'IMESSAGE' | 'WHATSAPP';
+  themeMode?: 'DARK' | 'LIGHT';
   // header text/layout
   headerNameFontPx: number; // px (pre-scale)
   headerGapPx: number;      // px gap between avatar and text/icons
@@ -90,6 +91,7 @@ const DEFAULT_SETTINGS: UISettings = {
   tsFontPx: 13,
   hudScalePct: 100,
   uiStyle: 'IMESSAGE',
+  themeMode: 'DARK',
   headerNameFontPx: 20,
   headerGapPx: 12,
   headerPadHPx: 14,
@@ -123,6 +125,7 @@ function FakeTextPreview({
 }) {
   const S = settings.hudScalePct / 100;
   const STYLE = settings.uiStyle || 'IMESSAGE';
+  const MODE = settings.themeMode || 'DARK';
   // derive HUD metrics from settings (uniform scale preserves ratios)
   const baseHUDW = Math.round(CANVAS.w * clamp01(settings.hudWidthPct));
   const HUD_W = Math.min(CANVAS.w - 24, Math.max(300, Math.round(baseHUDW * S)));
@@ -191,11 +194,22 @@ function FakeTextPreview({
   const onSeekRatio = (r: number) => { const v = clamp01(r) * durationMs; setT(v); startRef.current = performance.now() - v; };
   const progress = clamp01(timeMs / durationMs);
 
-  // Base surfaces by style
-  const surfaceColor = STYLE === 'WHATSAPP' ? '#111B21' : '#0A0A0A';
-  const headerColor = STYLE === 'WHATSAPP' ? '#202C33' : '#1F1F20';
-  const headerBorder = STYLE === 'WHATSAPP' ? '#0B141A' : '#2A2A2A';
-  const iconColor = STYLE === 'WHATSAPP' ? '#FFFFFF' : BLUE;
+  // Base surfaces by style & mode
+  const palettes = {
+    WHATSAPP: {
+      DARK: { surface: '#111B21', header: '#202C33', border: '#0B141A', icon: '#FFFFFF', recv: '#1F2C34', send: '#075E54', text: '#E9EDEF' },
+      LIGHT: { surface: '#F0F2F5', header: '#FFFFFF', border: '#E7E9EC', icon: '#111B21', recv: '#FFFFFF', send: '#D9FDD3', text: '#1F2C34' },
+    },
+    IMESSAGE: {
+      DARK: { surface: '#0A0A0A', header: '#1F1F20', border: '#2A2A2A', icon: BLUE, recv: '#1C1C1E', send: BLUE, text: '#FFFFFF' },
+      LIGHT: { surface: '#FFFFFF', header: '#F7F7F8', border: '#E5E5EA', icon: BLUE, recv: '#E9E9EB', send: '#0A84FF', text: '#111111' },
+    }
+  } as const;
+  const pal = palettes[STYLE][MODE];
+  const surfaceColor = pal.surface;
+  const headerColor = pal.header;
+  const headerBorder = pal.border;
+  const iconColor = pal.icon;
   const iconSize = STYLE === 'WHATSAPP' ? Math.max(ICON, Math.round(ICON * 1.2)) : ICON;
   const avatarDim = STYLE === 'WHATSAPP' ? Math.max(AVATAR, Math.round(AVATAR * 1.08)) : AVATAR;
   const nameFontSize = STYLE === 'WHATSAPP' ? Math.round(22 * S) : Math.round(20 * S);
@@ -208,8 +222,8 @@ function FakeTextPreview({
         {STYLE === 'WHATSAPP' ? (
           <div style={{ height: HEADER_H, borderBottom: `1px solid ${headerBorder}`, background: headerColor, display: 'flex', alignItems: 'center', gap: HEADER_GAP, padding: `0 ${HEADER_PAD_H}px` }}>
             <button aria-label="Back" onClick={() => {}} style={hdrIconBtn}><ChevronLeft color={iconColor} size={iconSize} /></button>
-            <div style={{ width: avatarDim, height: avatarDim, borderRadius: avatarDim / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
-              {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />) : (initials(contactName))}
+            <div style={{ width: avatarDim, height: avatarDim, borderRadius: avatarDim / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
+              {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: '50%' }} />) : (initials(contactName))}
             </div>
             <div style={{ display:'flex', flexDirection:'column', minWidth: 0 }}>
               <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: "#E9EDEF", letterSpacing: "-0.2px", whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{contactName}</div>
@@ -229,8 +243,8 @@ function FakeTextPreview({
               <FaceTimeLogoOutline color={BLUE} size={ICON} />
             </button>
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
-              <div style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
-                {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />) : (initials(contactName))}
+              <div style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
+                {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: '50%' }} />) : (initials(contactName))}
               </div>
               <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: "#FFFFFF", letterSpacing: "-0.2px" }}>{contactName} <span style={{marginLeft:6, opacity:.9}}>&rsaquo;</span></div>
             </div>
@@ -245,7 +259,7 @@ function FakeTextPreview({
               <div style={{ fontFamily: FONT, fontSize: TS_F, fontWeight: 500, color: "#A9A9AD" }}>{timeLine}</div>
             </div>
             {messages.slice(0, visibleCount).map((m) => (
-              <Bubble key={m.id} m={m} maxPct={BUB_MAX_PCT} r={BUB_R} ph={BUB_PH} pv={BUB_PV} f={BUB_F} style={STYLE} />
+              <Bubble key={m.id} m={m} maxPct={BUB_MAX_PCT} r={BUB_R} ph={BUB_PH} pv={BUB_PV} f={BUB_F} style={STYLE} mode={MODE} />
             ))}
           </div>
         </div>
@@ -259,13 +273,14 @@ function FakeTextPreview({
   );
 }
 
-function Bubble({ m, maxPct, r, ph, pv, f, style }: { m: any; maxPct: number; r: number; ph: number; pv: number; f: number; style: 'IMESSAGE'|'WHATSAPP' }) {
+function Bubble({ m, maxPct, r, ph, pv, f, style, mode }: { m: any; maxPct: number; r: number; ph: number; pv: number; f: number; style: 'IMESSAGE'|'WHATSAPP'; mode: 'DARK'|'LIGHT' }) {
   const isSender = m.speaker === "SENDER";
   const align = isSender ? "flex-end" : "flex-start";
-  const bg = style === 'WHATSAPP'
-    ? (isSender ? "#075E54" : "#1F2C34")
-    : (isSender ? BLUE : "#1C1C1E");
-  const fg = style === 'WHATSAPP' ? "#E9EDEF" : "#FFFFFF";
+  const PALETTE = style === 'WHATSAPP'
+    ? (mode === 'DARK' ? { recv: '#1F2C34', send: '#075E54', text: '#E9EDEF' } : { recv: '#FFFFFF', send: '#D9FDD3', text: '#1F2C34' })
+    : (mode === 'DARK' ? { recv: '#1C1C1E', send: BLUE, text: '#FFFFFF' } : { recv: '#E9E9EB', send: '#0A84FF', text: '#111111' });
+  const bg = isSender ? PALETTE.send : PALETTE.recv;
+  const fg = PALETTE.text;
   const small = Math.max(4, Math.round(r * 0.45));
   const radiusCss = style === 'WHATSAPP'
     ? (isSender ? `${r}px ${r}px ${small}px ${r}px` : `${r}px ${r}px ${r}px ${small}px`)
@@ -541,6 +556,17 @@ function FakeTextBuilder() {
                     </label>
                     <label>
                       <input type="radio" name="ui-style" checked={(settings.uiStyle||'IMESSAGE')==='WHATSAPP'} onChange={()=>setUI({ uiStyle: 'WHATSAPP' })} /> WhatsApp
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  <span style={{ fontSize: 12, opacity: 0.9 }}>Theme</span>
+                  <div>
+                    <label style={{ marginRight: 12 }}>
+                      <input type="radio" name="ui-theme" checked={(settings.themeMode||'DARK')==='DARK'} onChange={()=>setUI({ themeMode: 'DARK' })} /> Dark
+                    </label>
+                    <label>
+                      <input type="radio" name="ui-theme" checked={(settings.themeMode||'DARK')==='LIGHT'} onChange={()=>setUI({ themeMode: 'LIGHT' })} /> Light
                     </label>
                   </div>
                 </div>
