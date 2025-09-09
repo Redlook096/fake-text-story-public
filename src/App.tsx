@@ -270,11 +270,11 @@ function Bubble({ m, maxPct, r, ph, pv, f, style }: { m: any; maxPct: number; r:
   const radiusCss = style === 'WHATSAPP'
     ? (isSender ? `${r}px ${r}px ${small}px ${r}px` : `${r}px ${r}px ${r}px ${small}px`)
     : `${r}px`;
-  const extraShadow = style === 'WHATSAPP' ? "0 1px 0 rgba(0,0,0,.22) inset" : (isSender ? "0 1px 0 rgba(255,255,255,.08) inset" : "none");
-  const border = style === 'WHATSAPP' ? "1px solid rgba(255,255,255,.04)" : "none";
+  const extraShadow = style === 'WHATSAPP' ? "none" : (isSender ? "0 1px 0 rgba(255,255,255,.08) inset" : "none");
+  const border = style === 'WHATSAPP' ? "none" : "none";
   return (
     <div style={{ display: "flex", justifyContent: align, marginTop: 12 }}>
-      <div style={{ maxWidth: pct(maxPct), background: bg, color: fg, padding: `${pv}px ${ph}px`, borderRadius: radiusCss as any, border, fontFamily: FONT, fontSize: f, lineHeight: 1.25, whiteSpace: "pre-wrap", boxShadow: extraShadow }}>
+      <div style={{ maxWidth: pct(maxPct), background: bg, color: fg, padding: `${pv}px ${ph}px`, borderRadius: radiusCss as any, border, fontFamily: FONT, fontSize: f, lineHeight: 1.25, whiteSpace: "pre-wrap", boxShadow: extraShadow, backgroundClip: 'padding-box' }}>
         {m.text}
       </div>
     </div>
@@ -470,7 +470,7 @@ function FakeTextBuilder() {
         (window as any).__setExportTime(exportTimelineMs);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         const canvas = await html2canvas(targetEl, { backgroundColor: null, width: CANVAS.w, height: CANVAS.h, scale: 1, useCORS: true, logging: false });
-        const blob: Blob | null = await new Promise<Blob | null>((res) => canvas.toBlob((b: Blob | null) => res(b), 'image/jpeg', 0.85));
+        const blob: Blob | null = await new Promise<Blob | null>((res) => canvas.toBlob((b: Blob | null) => res(b), 'image/png'));
         if (!blob) throw new Error('Canvas toBlob failed');
         const ab = await blob.arrayBuffer();
         frames.push(new Uint8Array(ab));
@@ -480,14 +480,14 @@ function FakeTextBuilder() {
       const ffmpeg = new FFmpeg();
       await ffmpeg.load();
 
-      // Write frames
+      // Write frames (PNG avoids edge darkening)
       for (let i = 0; i < frames.length; i++) {
-        const name = `frame_${String(i).padStart(5, '0')}.jpg`;
+        const name = `frame_${String(i).padStart(5, '0')}.png`;
         await ffmpeg.writeFile(name, frames[i]);
       }
 
       setExportNote(`Encoding MP4 (${frames.length} frames @ ${fps}fps)…`);
-      await ffmpeg.exec(['-framerate', String(fps), '-i', 'frame_%05d.jpg', '-pix_fmt', 'yuv420p', '-vf', 'scale=1080:1920:flags=lanczos,format=yuv420p', '-movflags', '+faststart', 'out.mp4']);
+      await ffmpeg.exec(['-framerate', String(fps), '-i', 'frame_%05d.png', '-pix_fmt', 'yuv420p', '-vf', 'scale=1080:1920:flags=lanczos,format=yuv420p', '-movflags', '+faststart', 'out.mp4']);
       const data: any = await ffmpeg.readFile('out.mp4');
       const mp4Blob = new Blob([data.buffer ?? data], { type: 'video/mp4' });
       download('fake-text.mp4', mp4Blob);
