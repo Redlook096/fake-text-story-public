@@ -6,7 +6,7 @@ Quickstart
 git clone https://github.com/Redlook096/fake-text-story-public.git
 cd fake-text-story-public
 npm install
-npm run dev -- --open
+npm run dev:open
 ```
 
 Build & Preview
