@@ -33,8 +33,7 @@ const rid = () => Math.random().toString(36).slice(2, 10);
 function swap<T>(arr: T[], a: number, b: number): T[] { const c = arr.slice(); const t = c[a]; c[a] = c[b]; c[b] = t; return c; }
 const initials = (name: string) => (name.trim().split(/\s+/)[0]?.[0] ?? "").toUpperCase();
 const fmt = (ms: number) => { const s = Math.max(0, Math.floor(ms / 1000)); const m = Math.floor(s / 60).toString(); const ss = (s % 60).toString().padStart(2, "0"); return `${m}:${ss}`; };
-const bytesToDataUrl = (bytes: Uint8Array, mime: string) => new Promise<string>((resolve) => { const blob = new Blob([bytes], { type: mime }); const fr = new FileReader(); fr.onload = () => resolve(String(fr.result || "")); fr.readAsDataURL(blob); });
-const ADAM_LOCAL_WAV = new URL('../VoicePreview/adamtrail.wav', import.meta.url).href;
+//
 
 /** Safe file → dataURL (avoids object-URL policy pitfalls) */
 function fileToDataUrl(file: File): Promise<string> {
@@ -68,6 +67,11 @@ export type UISettings = {
   tsFontPx: number;        // px (pre-scale)
   // global
   hudScalePct: number;     // 75..140 (%). Uniformly scales HUD size & positions while keeping ratios.
+  uiStyle?: 'IMESSAGE' | 'WHATSAPP';
+  // header text/layout
+  headerNameFontPx: number; // px (pre-scale)
+  headerGapPx: number;      // px gap between avatar and text/icons
+  headerPadHPx: number;     // horizontal padding inside header
 };
 
 const DEFAULT_SETTINGS: UISettings = {
@@ -85,6 +89,10 @@ const DEFAULT_SETTINGS: UISettings = {
   bubbleFontPx: 22,
   tsFontPx: 13,
   hudScalePct: 100,
+  uiStyle: 'IMESSAGE',
+  headerNameFontPx: 20,
+  headerGapPx: 12,
+  headerPadHPx: 14,
 };
 
 // ---------------------------- Preview Canvas -----------------------------
@@ -97,6 +105,7 @@ function FakeTextPreview({
   settings,
   bgColor = "#D0021B",
   durationMs = 60000,
+  timeScale = 1,
   onTogglePlayExternal,
   timeOverrideMs,
 }: {
@@ -108,10 +117,12 @@ function FakeTextPreview({
   settings: UISettings;
   bgColor?: string;
   durationMs?: number;
+  timeScale?: number;
   onTogglePlayExternal?: (playing: boolean) => void;
   timeOverrideMs?: number;
 }) {
   const S = settings.hudScalePct / 100;
+  const STYLE = settings.uiStyle || 'IMESSAGE';
   // derive HUD metrics from settings (uniform scale preserves ratios)
   const baseHUDW = Math.round(CANVAS.w * clamp01(settings.hudWidthPct));
   const HUD_W = Math.min(CANVAS.w - 24, Math.max(300, Math.round(baseHUDW * S)));
@@ -121,6 +132,9 @@ function FakeTextPreview({
   const HEADER_H = Math.max(40, Math.round(settings.headerH * S));
   const AVATAR = Math.round(settings.avatarPx * S);
   const ICON = Math.round(settings.iconPx * S);
+  const HEADER_NAME_F = Math.round((settings.headerNameFontPx ?? 20) * S);
+  const HEADER_GAP = Math.round((settings.headerGapPx ?? 12) * S);
+  const HEADER_PAD_H = Math.round((settings.headerPadHPx ?? 14) * S);
   const CHAT_MAX = Math.max(120, Math.round(settings.chatMaxH * S));
   const BUB_MAX_PCT = clamp01(settings.bubbleMaxWidthPct);
   const BUB_R = Math.round(settings.bubbleRadius * S);
@@ -137,10 +151,15 @@ function FakeTextPreview({
   const measureRef = useRef<HTMLDivElement | null>(null); // inner content to measure true height
   const [revealH, setRevealH] = useState<number>(Math.max(100, Math.min(300, CHAT_MAX * 0.5)));
 
-  // schedule: one bubble every 3.000s (or per-message delay)
+  // schedule: one bubble every delay_s seconds (default 3s), compressed by timeScale when >1
   const schedule = useMemo(() => {
-    let acc = 0; return messages.map((m) => { const d = Math.round(((m.delay_s ?? 3) * 1000)); const at = acc; acc += d; return { id: m.id, at }; });
-  }, [messages]);
+    const scale = timeScale > 0 ? timeScale : 1;
+    let acc = 0;
+    return messages.map((m) => {
+      const dMs = Math.round(((m.delay_s ?? 3) * 1000) / scale);
+      const at = acc; acc += dMs; return { id: m.id, at };
+    });
+  }, [messages, timeScale]);
   const timeMs = exportMode && typeof timeOverrideMs === 'number' ? timeOverrideMs : t;
   const visibleCount = useMemo(() => { let i = 0; while (i < schedule.length && timeMs >= schedule[i].at - 5) i++; return i; }, [timeMs, schedule]);
 
@@ -172,35 +191,61 @@ function FakeTextPreview({
   const onSeekRatio = (r: number) => { const v = clamp01(r) * durationMs; setT(v); startRef.current = performance.now() - v; };
   const progress = clamp01(timeMs / durationMs);
 
+  // Base surfaces by style
+  const surfaceColor = STYLE === 'WHATSAPP' ? '#111B21' : '#0A0A0A';
+  const headerColor = STYLE === 'WHATSAPP' ? '#202C33' : '#1F1F20';
+  const headerBorder = STYLE === 'WHATSAPP' ? '#0B141A' : '#2A2A2A';
+  const iconColor = STYLE === 'WHATSAPP' ? '#FFFFFF' : BLUE;
+  const iconSize = STYLE === 'WHATSAPP' ? Math.max(ICON, Math.round(ICON * 1.2)) : ICON;
+  const avatarDim = STYLE === 'WHATSAPP' ? Math.max(AVATAR, Math.round(AVATAR * 1.08)) : AVATAR;
+  const nameFontSize = STYLE === 'WHATSAPP' ? Math.round(22 * S) : Math.round(20 * S);
+
   return (
     <div style={{ position: "relative", width: CANVAS.w, height: CANVAS.h, background: bgColor, overflow: "hidden" }}>
-      {/* iMessage HUD */}
-      <div style={{ position: "absolute", left: HUD_X, top: HUD_Y, width: HUD_W, borderRadius: HUD_RADIUS, background: "#0A0A0A", boxShadow: "0 18px 60px rgba(0,0,0,.35)", overflow: "hidden" }}>
+      {/* HUD */}
+      <div style={{ position: "absolute", left: HUD_X, top: HUD_Y, width: HUD_W, borderRadius: HUD_RADIUS, background: surfaceColor, boxShadow: "0 18px 60px rgba(0,0,0,.35)", overflow: "hidden" }}>
         {/* Header */}
-        <div style={{ position: "relative", height: HEADER_H, borderBottom: "1px solid #2A2A2A", background: "#1F1F20" }}>
-          <button aria-label="Back" onClick={() => {}} style={btnStyle({ left: 16, width: ICON + 22, height: ICON + 22 })}>
-            <ChevronLeft color={BLUE} size={ICON} />
-          </button>
-          <button aria-label="FaceTime" onClick={() => {}} style={btnStyle({ right: 16, width: ICON + 22, height: ICON + 22 })}>
-            <FaceTimeLogoOutline color={BLUE} size={ICON} />
-          </button>
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
-            <div style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
+        {STYLE === 'WHATSAPP' ? (
+          <div style={{ height: HEADER_H, borderBottom: `1px solid ${headerBorder}`, background: headerColor, display: 'flex', alignItems: 'center', gap: HEADER_GAP, padding: `0 ${HEADER_PAD_H}px` }}>
+            <button aria-label="Back" onClick={() => {}} style={hdrIconBtn}><ChevronLeft color={iconColor} size={iconSize} /></button>
+            <div style={{ width: avatarDim, height: avatarDim, borderRadius: avatarDim / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
               {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />) : (initials(contactName))}
             </div>
-            <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: Math.round(20 * S), color: "#F5F5F7", letterSpacing: "-0.2px" }}>{contactName} <span style={{marginLeft:6, opacity:.9}}>&rsaquo;</span></div>
+            <div style={{ display:'flex', flexDirection:'column', minWidth: 0 }}>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: "#E9EDEF", letterSpacing: "-0.2px", whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{contactName}</div>
+              <div style={{ fontFamily: FONT, fontSize: Math.round(12 * S), color: '#00A884', marginTop: 2 }}>Online</div>
+            </div>
+            <div style={{ marginLeft: 'auto', display:'flex', alignItems:'center', gap: 8 }}>
+              <button aria-label="Video" onClick={() => {}} style={hdrIconBtn}><VideoOutline color={iconColor} size={iconSize} /></button>
+              <button aria-label="Call" onClick={() => {}} style={hdrIconBtn}><PhoneOutline color={iconColor} size={iconSize} /></button>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div style={{ position: "relative", height: HEADER_H, borderBottom: `1px solid ${headerBorder}`, background: headerColor }}>
+            <button aria-label="Back" onClick={() => {}} style={btnStyle({ left: 16, width: ICON + 22, height: ICON + 22 })}>
+              <ChevronLeft color={BLUE} size={ICON} />
+            </button>
+            <button aria-label="FaceTime" onClick={() => {}} style={btnStyle({ right: 16, width: ICON + 22, height: ICON + 22 })}>
+              <FaceTimeLogoOutline color={BLUE} size={ICON} />
+            </button>
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 6 }}>
+              <div style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600 }}>
+                {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />) : (initials(contactName))}
+              </div>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: "#FFFFFF", letterSpacing: "-0.2px" }}>{contactName} <span style={{marginLeft:6, opacity:.9}}>&rsaquo;</span></div>
+            </div>
+          </div>
+        )}
 
         {/* Chat body: HEIGHT grows (no scrolling) */}
-        <div ref={bodyRef} style={{ height: revealH, padding: `${Math.round(12*S)}px ${Math.round(16*S)}px ${Math.round(24*S)}px ${Math.round(16*S)}px`, overflow: "hidden", background: "#0A0A0A", pointerEvents: "none" }}>
+        <div ref={bodyRef} style={{ height: revealH, padding: `${Math.round(10*S)}px ${Math.round(14*S)}px ${Math.round(20*S)}px ${Math.round(14*S)}px`, overflow: "hidden", background: surfaceColor, pointerEvents: "none", backgroundImage: STYLE==='WHATSAPP'? 'radial-gradient(rgba(255,255,255,0.035) 1px, transparent 1px)': undefined, backgroundSize: STYLE==='WHATSAPP'? '18px 18px': undefined }}>
           <div ref={measureRef}>
             {/* Row 0: time separator INSIDE chat */}
             <div style={{ display: "flex", justifyContent: "center", paddingTop: Math.round(6*S), paddingBottom: Math.round(10*S) }}>
               <div style={{ fontFamily: FONT, fontSize: TS_F, fontWeight: 500, color: "#A9A9AD" }}>{timeLine}</div>
             </div>
             {messages.slice(0, visibleCount).map((m) => (
-              <Bubble key={m.id} m={m} maxPct={BUB_MAX_PCT} r={BUB_R} ph={BUB_PH} pv={BUB_PV} f={BUB_F} />
+              <Bubble key={m.id} m={m} maxPct={BUB_MAX_PCT} r={BUB_R} ph={BUB_PH} pv={BUB_PV} f={BUB_F} style={STYLE} />
             ))}
           </div>
         </div>
@@ -214,14 +259,22 @@ function FakeTextPreview({
   );
 }
 
-function Bubble({ m, maxPct, r, ph, pv, f }: { m: any; maxPct: number; r: number; ph: number; pv: number; f: number }) {
+function Bubble({ m, maxPct, r, ph, pv, f, style }: { m: any; maxPct: number; r: number; ph: number; pv: number; f: number; style: 'IMESSAGE'|'WHATSAPP' }) {
   const isSender = m.speaker === "SENDER";
-  const bg = isSender ? BLUE : "#1C1C1E";
-  const fg = "#FFFFFF";
   const align = isSender ? "flex-end" : "flex-start";
+  const bg = style === 'WHATSAPP'
+    ? (isSender ? "#075E54" : "#1F2C34")
+    : (isSender ? BLUE : "#1C1C1E");
+  const fg = style === 'WHATSAPP' ? "#E9EDEF" : "#FFFFFF";
+  const small = Math.max(4, Math.round(r * 0.45));
+  const radiusCss = style === 'WHATSAPP'
+    ? (isSender ? `${r}px ${r}px ${small}px ${r}px` : `${r}px ${r}px ${r}px ${small}px`)
+    : `${r}px`;
+  const extraShadow = style === 'WHATSAPP' ? "0 1px 0 rgba(0,0,0,.22) inset" : (isSender ? "0 1px 0 rgba(255,255,255,.08) inset" : "none");
+  const border = style === 'WHATSAPP' ? "1px solid rgba(255,255,255,.04)" : "none";
   return (
     <div style={{ display: "flex", justifyContent: align, marginTop: 12 }}>
-      <div style={{ maxWidth: pct(maxPct), background: bg, color: fg, padding: `${pv}px ${ph}px`, borderRadius: r, fontFamily: FONT, fontSize: f, lineHeight: 1.22, whiteSpace: "pre-wrap", boxShadow: isSender ? "0 1px 0 rgba(255,255,255,.08) inset" : "none" }}>
+      <div style={{ maxWidth: pct(maxPct), background: bg, color: fg, padding: `${pv}px ${ph}px`, borderRadius: radiusCss as any, border, fontFamily: FONT, fontSize: f, lineHeight: 1.25, whiteSpace: "pre-wrap", boxShadow: extraShadow }}>
         {m.text}
       </div>
     </div>
@@ -255,9 +308,9 @@ function TransportBar({ progress, durationMs, onSeekRatio, onTogglePlay }: any) 
 
 // ---------------- Builder + Wizard Tabs + Fixed Preview ----------------
 function FakeTextBuilder() {
-  type Tab = "SCRIPT" | "VOICES" | "ADVANCED" | "BACKGROUND" | "EXPORT";
+  type Tab = "SCRIPT" | "ADVANCED" | "BACKGROUND" | "EXPORT";
   const [tab, setTab] = useState<Tab>("SCRIPT");
-  const stepIndex = { SCRIPT: 1, VOICES: 2, ADVANCED: 3, BACKGROUND: 4, EXPORT: 5 }[tab];
+  const stepIndex = { SCRIPT: 1, ADVANCED: 2, BACKGROUND: 3, EXPORT: 4 }[tab];
 
   // Script state
   const [contactName, setContactName] = useState("Anna");
@@ -274,65 +327,10 @@ function FakeTextBuilder() {
   const setUI = (patch: Partial<UISettings>) => setSettings((s) => ({ ...s, ...patch }));
   const [showSizing, setShowSizing] = useState(true);
 
-  // Background
+  // Background & UI style
   const [bgColor, setBgColor] = useState<string>("#D0021B");
 
-  // TTS / Voices (Async AI)
-  const ASYNC_API_BASE = "https://api.async.ai/v1";
-  const ASYNC_API_KEY = "sk_d6353f89aae4f33b903dc2b5b87cb890541948de0008f44317700ec765e7a858";
-  const ASYNC_TTS_MODEL = "async-tts";
-  const [voices, setVoices] = useState<string[]>([]);
-  const [senderVoice, setSenderVoice] = useState<string>("");
-  const [receiverVoice, setReceiverVoice] = useState<string>("");
-  const ADAM_PREVIEW_TEXT = "hey its adam, you know the viral voice on ticktok";
-  const [previewing, setPreviewing] = useState<null | 'sender' | 'receiver'>(null);
-  const [senderPreviewUrl, setSenderPreviewUrl] = useState<string | null>(null);
-  const [receiverPreviewUrl, setReceiverPreviewUrl] = useState<string | null>(null);
-  const [voicePreviewCache, setVoicePreviewCache] = useState<Record<string,string>>({});
-
-  const fetchVoices = async () => {
-    try {
-      // DIRECT: async.ai user voices library endpoint (Your Voices)
-      const libraryRes = await fetch(`${ASYNC_API_BASE}/users/me/voices`, { headers: { Authorization: `Bearer ${ASYNC_API_KEY}` } });
-      let list: string[] = [];
-      if (libraryRes.ok) {
-        const data = await libraryRes.json();
-        list = Array.isArray(data?.data)
-          ? data.data.map((v: any) => v?.id || v?.name).filter(Boolean)
-          : Array.isArray(data?.voices)
-            ? data.voices.map((v: any) => v?.id || v?.name).filter(Boolean)
-            : [];
-      }
-      const fallback = ["adam","alloy","verse","aria","coral","sage","amber","onxy","rose","pearl","opal"].filter(Boolean);
-      let next = (list.length ? list : fallback).slice(0, 64);
-      if (!next.includes('adam')) next = ['adam', ...next];
-      setVoices(next);
-      if (!senderVoice && next[0]) setSenderVoice(next[0]);
-      if (!receiverVoice && next[1]) setReceiverVoice(next[1]);
-    } catch {
-      const fallback = ["adam","alloy","verse","aria","coral","sage","amber","onyx","rose","pearl","opal"];
-      setVoices(fallback);
-      if (!senderVoice) setSenderVoice(fallback[0]);
-      if (!receiverVoice) setReceiverVoice(fallback[1]);
-    }
-  };
-  useEffect(() => { if (voices.length === 0) fetchVoices(); }, []);
-
-  const getOrCreatePreviewUrl = async (voice: string): Promise<string> => {
-    try {
-      const storageKey = `tts_preview_${voice}`;
-      const cached = localStorage.getItem(storageKey);
-      if (cached) return cached;
-      const line = voice.toLowerCase() === 'adam' ? ADAM_PREVIEW_TEXT : 'Hello, this is a sample voice.';
-      const seg = await synthesizeSegment(line, voice, -1);
-      const url = await bytesToDataUrl(seg.bytes, 'audio/mpeg');
-      try { localStorage.setItem(storageKey, url); } catch {}
-      setVoicePreviewCache((c)=>({ ...c, [voice]: url }));
-      return url;
-    } catch {
-      return '';
-    }
-  };
+  // (TTS removed)
 
   // DnD helpers
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -397,8 +395,8 @@ function FakeTextBuilder() {
   };
   const downloadManifest = () => download('render-manifest.json', JSON.stringify(manifest, null, 2));
 
-  const goNext = () => setTab((t)=> t === 'SCRIPT' ? 'VOICES' : t === 'VOICES' ? 'ADVANCED' : t === 'ADVANCED' ? 'BACKGROUND' : t === 'BACKGROUND' ? 'EXPORT' : 'EXPORT');
-  const goPrev = () => setTab((t)=> t === 'EXPORT' ? 'BACKGROUND' : t === 'BACKGROUND' ? 'ADVANCED' : t === 'ADVANCED' ? 'VOICES' : 'SCRIPT');
+  const goNext = () => setTab((t)=> t === 'SCRIPT' ? 'ADVANCED' : t === 'ADVANCED' ? 'BACKGROUND' : t === 'BACKGROUND' ? 'EXPORT' : 'EXPORT');
+  const goPrev = () => setTab((t)=> t === 'EXPORT' ? 'BACKGROUND' : t === 'BACKGROUND' ? 'ADVANCED' : 'SCRIPT');
 
   // Exact export: render frames from the same DOM using html2canvas, encode with ffmpeg.wasm
   const naturalDurationMs = useMemo(() => {
@@ -407,42 +405,13 @@ function FakeTextBuilder() {
     return Math.max(3000, total + 1500);
   }, [messages]);
 
-  const synthesizeSegment = async (text: string, voice: string, idx: number): Promise<{ bytes: Uint8Array; durationMs: number }> => {
-    // Prefer user library voice synthesis if available
-    const url = `${ASYNC_API_BASE}/users/me/voices/${encodeURIComponent(voice)}/speech`;
-    const fallbackUrl = `${ASYNC_API_BASE}/audio/speech`;
-    let res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ASYNC_API_KEY}` }, body: JSON.stringify({ input: text, format: 'mp3' }) });
-    if (!res.ok) {
-      res = await fetch(fallbackUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ASYNC_API_KEY}` }, body: JSON.stringify({ model: ASYNC_TTS_MODEL, voice, input: text, format: 'mp3' }) });
-    }
-    if (!res.ok) throw new Error(`TTS failed (${res.status})`);
-    const ab = await res.arrayBuffer();
-    // Decode to obtain accurate duration
-    const ac = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const audioBuf = await ac.decodeAudioData(ab.slice(0));
-    const durationMs = Math.round(audioBuf.duration * 1000);
-    return { bytes: new Uint8Array(ab), durationMs };
-  };
+  // Force exports under 40 seconds by applying time compression when needed
+  const MAX_EXPORT_MS = 40000;
+  const timeScale = useMemo(() => {
+    return naturalDurationMs > MAX_EXPORT_MS ? (naturalDurationMs / MAX_EXPORT_MS) : 1;
+  }, [naturalDurationMs]);
 
-  const previewVoice = async (who: 'sender'|'receiver') => {
-    if (previewing) return;
-    try {
-      setPreviewing(who);
-      const voice = who === 'sender' ? (senderVoice || voices[0] || 'adam') : (receiverVoice || voices[1] || voices[0] || 'adam');
-      let url: string | null = null;
-      if (voice.toLowerCase() === 'adam') {
-        // Use local bundled sample for Adam
-        url = ADAM_LOCAL_WAV;
-      } else {
-        const existing = who === 'sender' ? (senderPreviewUrl || voicePreviewCache[voice]) : (receiverPreviewUrl || voicePreviewCache[voice]);
-        url = existing || await getOrCreatePreviewUrl(voice);
-      }
-      if (who === 'sender') setSenderPreviewUrl(url); else setReceiverPreviewUrl(url);
-      const audio = new Audio(url); audio.onended = () => setPreviewing(null); await audio.play();
-    } catch {
-      setPreviewing(null);
-    }
-  };
+  // (TTS removed)
 
   const exportMp4Exact = async () => {
     if (exporting) return;
@@ -470,7 +439,8 @@ function FakeTextBuilder() {
             messages={messages}
             settings={settings}
             bgColor={bgColor}
-            durationMs={naturalDurationMs}
+            durationMs={Math.min(naturalDurationMs, MAX_EXPORT_MS)}
+            timeScale={timeScale}
             timeOverrideMs={timeMs}
           />
         );
@@ -480,60 +450,23 @@ function FakeTextBuilder() {
       // Wait a frame for layout
       await new Promise((r) => requestAnimationFrame(() => r(null)));
 
-      // 1) Generate TTS per message in order using selected voices
-      setExportNote('Generating speech audio…');
-      const audioSegBytes: Uint8Array[] = [];
-      const audioDurations: number[] = [];
-      for (let i = 0; i < messages.length; i++) {
-        const m = messages[i];
-        const voice = (m.speaker === 'SENDER' ? senderVoice : receiverVoice) || voices[0] || 'alloy';
-        setExportNote(`Generating speech (${i+1}/${messages.length})…`);
-        const seg = await synthesizeSegment(m.text, voice, i);
-        audioSegBytes.push(seg.bytes);
-        audioDurations.push(seg.durationMs);
-      }
-
-      // 2) Build an export-specific message schedule using speech durations (next message appears when previous finishes)
-      const messagesForExport = messages.map((m, i) => ({ ...m, delay_s: Math.max(0.01, Math.round((audioDurations[i] || 0) / 10) / 100) }));
-      // Remount export host with speech-driven schedule
-      offRoot.unmount();
-      offRoot.render((() => {
-        const ExportHost2: React.FC = () => {
-          const [timeMs, setTimeMs] = useState(0);
-          (window as any).__setExportTime = setTimeMs;
-          return (
-            <FakeTextPreview
-              exportMode
-              contactName={contactName}
-              avatarUrl={avatarUrl}
-              timeLine={timeLine}
-              messages={messagesForExport}
-              settings={settings}
-              bgColor={bgColor}
-              durationMs={audioDurations.reduce((a,b)=>a+b,0)}
-              timeOverrideMs={timeMs}
-            />
-          );
-        };
-        return <ExportHost2 />;
-      })());
-
+      // (TTS removed) Use configured delays for export timeline
       await new Promise((r) => requestAnimationFrame(() => r(null)));
 
-      // 3) Capture frames strictly at 30fps along the speech-paced timeline
+      // 3) Capture frames strictly at 30fps along the time-compressed timeline
       setExportNote('Capturing frames…');
       const { default: html2canvas } = await import('html2canvas');
       const fps = 30;
       const dt = Math.round(1000 / fps);
       const frames: Array<Uint8Array> = [];
-      const naturalTotalMs = audioDurations.reduce((a,b)=>a+b,0);
-      const totalFrames = Math.ceil(naturalTotalMs / dt);
+      const totalMs = Math.min(naturalDurationMs, MAX_EXPORT_MS);
+      const totalFrames = Math.ceil(totalMs / dt);
 
       // Capture the offscreen export DOM to ensure timeline control and no scrubber
       const targetEl = off;
 
       for (let i = 0; i <= totalFrames; i++) {
-        const exportTimelineMs = Math.min(naturalTotalMs, Math.round(i * dt));
+        const exportTimelineMs = Math.min(totalMs, Math.round(i * dt));
         (window as any).__setExportTime(exportTimelineMs);
         await new Promise((r) => requestAnimationFrame(() => r(null)));
         const canvas = await html2canvas(targetEl, { backgroundColor: null, width: CANVAS.w, height: CANVAS.h, scale: 1, useCORS: true, logging: false });
@@ -543,7 +476,6 @@ function FakeTextBuilder() {
         frames.push(new Uint8Array(ab));
       }
 
-      setExportNote('Encoding audio…');
       const { FFmpeg } = await import('@ffmpeg/ffmpeg');
       const ffmpeg = new FFmpeg();
       await ffmpeg.load();
@@ -554,20 +486,8 @@ function FakeTextBuilder() {
         await ffmpeg.writeFile(name, frames[i]);
       }
 
-      // Write audio segments and concat using filter_complex to avoid mp3 container issues
-      const inputArgs: string[] = [];
-      const concatInputs: string[] = [];
-      for (let i = 0; i < audioSegBytes.length; i++) {
-        const aName = `seg_${String(i).padStart(3,'0')}.mp3`;
-        await ffmpeg.writeFile(aName, audioSegBytes[i]);
-        inputArgs.push('-i', aName);
-        concatInputs.push(`[${i}:a]`);
-      }
-      const filter = `${concatInputs.join('')}concat=n=${audioSegBytes.length}:v=0:a=1[a]`;
-      await ffmpeg.exec([...inputArgs, '-filter_complex', filter, '-map', '[a]', '-c:a', 'aac', 'voice.m4a']);
-
       setExportNote(`Encoding MP4 (${frames.length} frames @ ${fps}fps)…`);
-      await ffmpeg.exec(['-framerate', String(fps), '-i', 'frame_%05d.jpg', '-i', 'voice.m4a', '-c:a', 'aac', '-pix_fmt', 'yuv420p', '-vf', 'scale=1080:1920:flags=lanczos,format=yuv420p', '-shortest', '-movflags', '+faststart', 'out.mp4']);
+      await ffmpeg.exec(['-framerate', String(fps), '-i', 'frame_%05d.jpg', '-pix_fmt', 'yuv420p', '-vf', 'scale=1080:1920:flags=lanczos,format=yuv420p', '-movflags', '+faststart', 'out.mp4']);
       const data: any = await ffmpeg.readFile('out.mp4');
       const mp4Blob = new Blob([data.buffer ?? data], { type: 'video/mp4' });
       download('fake-text.mp4', mp4Blob);
@@ -590,17 +510,16 @@ function FakeTextBuilder() {
         {/* Title bar (no traffic-lights) */}
         <div style={{ height: 44, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px", borderBottom: `1px solid ${BORDER}`, background: "linear-gradient(180deg, rgba(28,28,30,.85), rgba(28,28,30,.75))", backdropFilter: "saturate(180%) blur(10px)" }}>
           <div style={{ color: TEXT, fontFamily: FONT, fontSize: 13, opacity: .9 }}>Fake Text Story — Builder</div>
-          <div style={{ color: SUBTEXT, fontFamily: FONT, fontSize: 12 }}>Step {stepIndex} of 5</div>
+          <div style={{ color: SUBTEXT, fontFamily: FONT, fontSize: 12 }}>Step {stepIndex} of 4</div>
         </div>
 
         {/* Numbered tabs */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: 12, borderBottom: `1px solid ${BORDER}`, background: "linear-gradient(180deg, rgba(17,17,19,.75), rgba(17,17,19,.60))", backdropFilter: "saturate(180%) blur(8px)" }}>
           <Segmented value={tab} onChange={(k)=>setTab(k as any)} options={[
             { key: "SCRIPT", label: "1. Script" },
-            { key: "VOICES", label: "2. Voices" },
-            { key: "ADVANCED", label: "3. Advanced" },
-            { key: "BACKGROUND", label: "4. Background" },
-            { key: "EXPORT", label: "5. Export" },
+            { key: "ADVANCED", label: "2. Advanced" },
+            { key: "BACKGROUND", label: "3. Background" },
+            { key: "EXPORT", label: "4. Export" },
           ]} />
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={goPrev} style={toolbarBtn} disabled={tab==='SCRIPT'}>Back</button>
@@ -612,6 +531,21 @@ function FakeTextBuilder() {
         <div style={{ height: "calc(100% - 88px)", overflowY: "auto", padding: 16, fontFamily: FONT, color: TEXT }}>
           {tab === "SCRIPT" && (
             <>
+              <section style={card}>
+                <h4 style={h4}>Style</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, opacity: 0.9 }}>UI Style</span>
+                  <div>
+                    <label style={{ marginRight: 12 }}>
+                      <input type="radio" name="ui-style" checked={(settings.uiStyle||'IMESSAGE')==='IMESSAGE'} onChange={()=>setUI({ uiStyle: 'IMESSAGE' })} /> iMessage
+                    </label>
+                    <label>
+                      <input type="radio" name="ui-style" checked={(settings.uiStyle||'IMESSAGE')==='WHATSAPP'} onChange={()=>setUI({ uiStyle: 'WHATSAPP' })} /> WhatsApp
+                    </label>
+                  </div>
+                </div>
+              </section>
+
               <section style={card}>
                 <h4 style={h4}>Identity</h4>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -667,42 +601,7 @@ function FakeTextBuilder() {
             </>
           )}
 
-          {tab === "VOICES" && (
-            <section style={{ ...card, padding:16, background:"linear-gradient(180deg, #0F1115 0%, #0B0D12 100%)", border:`1px solid ${BORDER}`, borderRadius:14, boxShadow:"0 10px 40px rgba(0,0,0,.35)", display:'grid', gap:14 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <h4 style={{...h4, margin:0, fontSize:16}}>Voices</h4>
-                <div style={{ display:'flex', gap:8 }}>
-                  <button onClick={fetchVoices} style={btnPrimary}>Refresh</button>
-                </div>
-              </div>
-              <p style={{opacity:.85, margin:0, fontSize:12}}>Choose premium voices for each speaker and preview before export. Includes Adam (viral TikTok style).</p>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-                <div style={{ padding:12, border:`1px solid ${BORDER}`, borderRadius:12, background:"#0E1014" }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
-                    <strong>Sender</strong>
-                    {senderPreviewUrl && <audio controls src={senderPreviewUrl} style={{height:28}} />}
-                  </div>
-                  <select style={sel} value={senderVoice} onChange={(e)=>setSenderVoice(e.target.value)}>{voices.map(v=> <option key={v} value={v}>{v}</option>)}</select>
-                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                    <button onClick={()=>previewVoice('sender')} disabled={previewing!==null} style={btnPrimary}>{previewing==='sender'?'Playing…':'Preview'}</button>
-                  </div>
-                </div>
-                <div style={{ padding:12, border:`1px solid ${BORDER}`, borderRadius:12, background:"#0E1014" }}>
-                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:8 }}>
-                    <strong>Receiver</strong>
-                    {receiverPreviewUrl && <audio controls src={receiverPreviewUrl} style={{height:28}} />}
-                  </div>
-                  <select style={sel} value={receiverVoice} onChange={(e)=>setReceiverVoice(e.target.value)}>{voices.map(v=> <option key={v} value={v}>{v}</option>)}</select>
-                  <div style={{ display:'flex', gap:8, marginTop:8 }}>
-                    <button onClick={()=>previewVoice('receiver')} disabled={previewing!==null} style={btnPrimary}>{previewing==='receiver'?'Playing…':'Preview'}</button>
-                  </div>
-                </div>
-              </div>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'flex-end', gap:12 }}>
-                <div style={{ fontSize:12, color:SUBTEXT }}>Powered by Async AI</div>
-              </div>
-            </section>
-          )}
+          {false}
 
           {tab === "ADVANCED" && (
             <section style={card}>
@@ -714,21 +613,24 @@ function FakeTextBuilder() {
                 <button onClick={()=>setSettings({...DEFAULT_SETTINGS})} style={btnPrimary}>Reset to default</button>
               </div>
               {showSizing && (
-                <div id="sizing-panel" style={{marginTop:8}}>
-                  <SliderRow label="Overall HUD scale %" min={50} max={240} value={settings.hudScalePct} onChange={(v)=>setUI({hudScalePct:v})} />
+                <div id="sizing-panel" style={{marginTop:8, maxHeight: '60vh', overflowY: 'auto', paddingRight: 8}}>
+                  <SliderRow label="Overall HUD scale %" min={50} max={480} value={settings.hudScalePct} onChange={(v)=>setUI({hudScalePct:v})} />
                   <SliderRow label="HUD width %" min={45} max={98} value={Math.round(settings.hudWidthPct*100)} onChange={(v)=>setUI({hudWidthPct:v/100})} />
-                  <SliderRow label="HUD Y (px)" min={40} max={320} value={settings.hudY} onChange={(v)=>setUI({hudY:v})} />
-                  <SliderRow label="HUD radius" min={0} max={44} value={settings.hudRadius} onChange={(v)=>setUI({hudRadius:v})} />
-                  <SliderRow label="Header height" min={42} max={96} value={settings.headerH} onChange={(v)=>setUI({headerH:v})} />
-                  <SliderRow label="Avatar size" min={36} max={80} value={settings.avatarPx} onChange={(v)=>setUI({avatarPx:v})} />
-                  <SliderRow label="Icon size" min={18} max={36} value={settings.iconPx} onChange={(v)=>setUI({iconPx:v})} />
-                  <SliderRow label="Chat max height" min={150} max={560} value={settings.chatMaxH} onChange={(v)=>setUI({chatMaxH:v})} />
+                  <SliderRow label="HUD Y (px)" min={40} max={640} value={settings.hudY} onChange={(v)=>setUI({hudY:v})} />
+                  <SliderRow label="HUD radius" min={0} max={88} value={settings.hudRadius} onChange={(v)=>setUI({hudRadius:v})} />
+                  <SliderRow label="Header height" min={42} max={192} value={settings.headerH} onChange={(v)=>setUI({headerH:v})} />
+                  <SliderRow label="Avatar size" min={36} max={160} value={settings.avatarPx} onChange={(v)=>setUI({avatarPx:v})} />
+                  <SliderRow label="Icon size" min={18} max={72} value={settings.iconPx} onChange={(v)=>setUI({iconPx:v})} />
+                  <SliderRow label="Chat max height" min={150} max={1120} value={settings.chatMaxH} onChange={(v)=>setUI({chatMaxH:v})} />
                   <SliderRow label="Bubble max width %" min={60} max={95} value={Math.round(settings.bubbleMaxWidthPct*100)} onChange={(v)=>setUI({bubbleMaxWidthPct:v/100})} />
-                  <SliderRow label="Bubble radius" min={12} max={28} value={settings.bubbleRadius} onChange={(v)=>setUI({bubbleRadius:v})} />
-                  <SliderRow label="Bubble pad H" min={10} max={28} value={settings.bubblePadH} onChange={(v)=>setUI({bubblePadH:v})} />
-                  <SliderRow label="Bubble pad V" min={8} max={22} value={settings.bubblePadV} onChange={(v)=>setUI({bubblePadV:v})} />
-                  <SliderRow label="Bubble font px" min={16} max={28} value={settings.bubbleFontPx} onChange={(v)=>setUI({bubbleFontPx:v})} />
-                  <SliderRow label="Timestamp font px" min={11} max={18} value={settings.tsFontPx} onChange={(v)=>setUI({tsFontPx:v})} />
+                  <SliderRow label="Bubble radius" min={12} max={56} value={settings.bubbleRadius} onChange={(v)=>setUI({bubbleRadius:v})} />
+                  <SliderRow label="Bubble pad H" min={10} max={56} value={settings.bubblePadH} onChange={(v)=>setUI({bubblePadH:v})} />
+                  <SliderRow label="Bubble pad V" min={8} max={44} value={settings.bubblePadV} onChange={(v)=>setUI({bubblePadV:v})} />
+                  <SliderRow label="Bubble font px" min={16} max={56} value={settings.bubbleFontPx} onChange={(v)=>setUI({bubbleFontPx:v})} />
+                  <SliderRow label="Timestamp font px" min={11} max={36} value={settings.tsFontPx} onChange={(v)=>setUI({tsFontPx:v})} />
+                  <SliderRow label="Header name font px" min={12} max={64} value={settings.headerNameFontPx} onChange={(v)=>setUI({headerNameFontPx:v})} />
+                  <SliderRow label="Header gap px" min={4} max={48} value={settings.headerGapPx} onChange={(v)=>setUI({headerGapPx:v})} />
+                  <SliderRow label="Header horizontal padding px" min={8} max={48} value={settings.headerPadHPx} onChange={(v)=>setUI({headerPadHPx:v})} />
                 </div>
               )}
             </section>
@@ -771,7 +673,7 @@ function FakeTextBuilder() {
       <div style={{ width: PRE_W, height: "calc(100vh - 48px)", position: isNarrow?"static":"sticky", top: 24, display: "flex", alignItems: "flex-start", justifyContent: "center", margin: isNarrow?"0 auto":undefined }}>
         <div id="preview-box" style={{ position: 'relative', width: PRE_W, height: PRE_H, background: "#000", borderRadius: 20, overflow: "hidden", boxShadow: "0 20px 80px rgba(0,0,0,.45)" }}>
           <div style={{ position: 'absolute', left: offsetX, top: offsetY, width: CANVAS.w, height: CANVAS.h, transform: `scale(${scale})`, transformOrigin: "top left" }}>
-            <FakeTextPreview contactName={contactName} avatarUrl={avatarUrl} timeLine={timeLine} messages={messages} settings={settings} bgColor={bgColor} />
+            <FakeTextPreview contactName={contactName} avatarUrl={avatarUrl} timeLine={timeLine} messages={messages} settings={settings} bgColor={bgColor} timeScale={timeScale} durationMs={Math.min(naturalDurationMs, MAX_EXPORT_MS)} />
           </div>
         </div>
       </div>
@@ -784,7 +686,7 @@ function SliderRow({ label, min, max, value, onChange }: { label: string; min: n
     <label style={{ display: "grid", gridTemplateColumns: "180px 1fr 72px", alignItems: "center", gap: 8, margin: "8px 0" }}>
       <span style={{ fontSize: 12, opacity: 0.9 }}>{label}</span>
       <input type="range" min={min} max={max} value={value} onChange={(e)=>onChange(Number((e.target as HTMLInputElement).value))} />
-      <input type="number" min={min} max={max} value={value} onChange={(e)=>onChange(Number((e.target as HTMLInputElement).value))} style={{ ...inp, padding: "6px 8px" }} />
+      <input type="number" value={value} onChange={(e)=>onChange(Number((e.target as HTMLInputElement).value))} style={{ ...inp, padding: "6px 8px" }} />
     </label>
   );
 }
@@ -826,8 +728,21 @@ const rowStyle = (isDragging?: boolean, isOver?: boolean): React.CSSProperties =
 const btnStyle = (pos: Partial<React.CSSProperties>): React.CSSProperties => ({ position: "absolute", top: "50%", transform: "translateY(-50%)", width: 44, height: 44, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", color: BLUE, cursor: "pointer", ...pos });
 const transportBtn: React.CSSProperties = { width: 48, height: 48, borderRadius: 12, border: "1px solid rgba(255,255,255,.28)", background: "rgba(0,0,0,.35)", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
 
+const hdrIconBtn: React.CSSProperties = { width: 40, height: 40, borderRadius: 10, border: "none", background: "transparent", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" };
+
 function ChevronLeft({ color = BLUE, size = 22 }: { color?: string; size?: number }) { return (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 18l-6-6 6-6" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>); }
 function FaceTimeLogoOutline({ color = BLUE, size = 22 }: { color?: string; size?: number }) { return (<svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2.5" y="6.5" width="13" height="11" rx="2.5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><path d="M16 10 L21 7 L21 17 L16 14 Z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>); }
+function VideoOutline({ color = BLUE, size = 22 }: { color?: string; size?: number }) { return (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <rect x="3" y="6" width="13" height="12" rx="2" stroke={color} strokeWidth="2" />
+    <path d="M16 10 L21 7 L21 17 L16 14 Z" stroke={color} strokeWidth="2" fill="none"/>
+  </svg>
+); }
+function PhoneOutline({ color = BLUE, size = 22 }: { color?: string; size?: number }) { return (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M22 16.92v2a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.09 5.2 2 2 0 0 1 4.11 3h2a2 2 0 0 1 2 1.72c.12.89.33 1.76.63 2.6a2 2 0 0 1-.45 2.11L7.09 10.9a16 16 0 0 0 6 6l1.47-1.8a2 2 0 0 1 2.11-.45c.84.3 1.71.51 2.6.63A2 2 0 0 1 22 16.92z" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+  </svg>
+); }
 function PlayPauseIcon() { return (<svg width="22" height="22" viewBox="0 0 24 24" fill="#FFF" aria-hidden="true"><path d="M8 5v14l11-7z"/><path d="M6 5h4v14H6z" opacity=".0"/></svg>); }
 
 export default function App(){
