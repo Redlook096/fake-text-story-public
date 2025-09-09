@@ -214,6 +214,10 @@ function FakeTextPreview({
   const avatarDim = STYLE === 'WHATSAPP' ? Math.max(AVATAR, Math.round(AVATAR * 1.08)) : AVATAR;
   const nameFontSize = STYLE === 'WHATSAPP' ? Math.round(22 * S) : Math.round(20 * S);
 
+  // Text colors per mode
+  const textPrimary = MODE === 'DARK' ? '#FFFFFF' : '#111111';
+  const tsColor = MODE === 'DARK' ? '#A9A9AD' : '#6B7280';
+
   return (
     <div style={{ position: "relative", width: CANVAS.w, height: CANVAS.h, background: bgColor, overflow: "hidden" }}>
       {/* HUD */}
@@ -226,7 +230,7 @@ function FakeTextPreview({
               {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: '50%' }} />) : (initials(contactName))}
             </div>
             <div style={{ display:'flex', flexDirection:'column', minWidth: 0 }}>
-              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: "#E9EDEF", letterSpacing: "-0.2px", whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{contactName}</div>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: pal.text, letterSpacing: "-0.2px", whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{contactName}</div>
               <div style={{ fontFamily: FONT, fontSize: Math.round(12 * S), color: '#00A884', marginTop: 2 }}>Online</div>
             </div>
             <div style={{ marginLeft: 'auto', display:'flex', alignItems:'center', gap: 8 }}>
@@ -246,7 +250,7 @@ function FakeTextPreview({
               <div style={{ width: AVATAR, height: AVATAR, borderRadius: AVATAR / 2, overflow: "hidden", background: "#C7C7CC", color: "#FFFFFF", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, flexShrink: 0 }}>
                 {avatarUrl ? (<img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: '50%' }} />) : (initials(contactName))}
               </div>
-              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: "#FFFFFF", letterSpacing: "-0.2px" }}>{contactName} <span style={{marginLeft:6, opacity:.9}}>&rsaquo;</span></div>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: Math.max(12, HEADER_NAME_F), color: pal.text, letterSpacing: "-0.2px" }}>{contactName} <span style={{marginLeft:6, opacity:.9}}>&rsaquo;</span></div>
             </div>
           </div>
         )}
@@ -256,7 +260,7 @@ function FakeTextPreview({
           <div ref={measureRef}>
             {/* Row 0: time separator INSIDE chat */}
             <div style={{ display: "flex", justifyContent: "center", paddingTop: Math.round(6*S), paddingBottom: Math.round(10*S) }}>
-              <div style={{ fontFamily: FONT, fontSize: TS_F, fontWeight: 500, color: "#A9A9AD" }}>{timeLine}</div>
+              <div style={{ fontFamily: FONT, fontSize: TS_F, fontWeight: 500, color: tsColor }}>{timeLine}</div>
             </div>
             {messages.slice(0, visibleCount).map((m) => (
               <Bubble key={m.id} m={m} maxPct={BUB_MAX_PCT} r={BUB_R} ph={BUB_PH} pv={BUB_PV} f={BUB_F} style={STYLE} mode={MODE} />
