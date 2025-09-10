@@ -284,7 +284,9 @@ function Bubble({ m, maxPct, r, ph, pv, f, style, mode }: { m: any; maxPct: numb
     ? (mode === 'DARK' ? { recv: '#1F2C34', send: '#075E54', text: '#E9EDEF' } : { recv: '#FFFFFF', send: '#D9FDD3', text: '#1F2C34' })
     : (mode === 'DARK' ? { recv: '#1C1C1E', send: BLUE, text: '#FFFFFF' } : { recv: '#E9E9EB', send: '#0A84FF', text: '#111111' });
   const bg = isSender ? PALETTE.send : PALETTE.recv;
-  const fg = PALETTE.text;
+  let fg = PALETTE.text;
+  // Ensure iMessage blue bubbles always use white text in both light and dark modes
+  if (style === 'IMESSAGE' && isSender) fg = '#FFFFFF';
   const small = Math.max(4, Math.round(r * 0.45));
   const radiusCss = style === 'WHATSAPP'
     ? (isSender ? `${r}px ${r}px ${small}px ${r}px` : `${r}px ${r}px ${r}px ${small}px`)
